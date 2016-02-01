@@ -9,6 +9,7 @@ import itertools
 import argparse
 import cPickle as pickle
 from collections import defaultdict
+from pybedtools import BedTool
 sys.path.append("/hive/users/ifiddes/comparativeAnnotator")
 from lib.seq_lib import ChromosomeInterval
 from lib.general_lib import format_ratio
@@ -83,11 +84,9 @@ def determine_if_bin_is_right_paralog(reads, vcf_recs, bam_handle, min_aln_size=
             chrom_positions = range(vcf_rec.start, vcf_rec.end)
             read_positions = find_read_positions(chrom_positions, read)
             if len(chrom_positions) != len(read_positions) or None in read_positions:
-                #interesting_reads.append(read)
                 total_intersections += 1
                 continue
             read_seq = "".join([read.seq[i] for i in read_positions])
-            #(str(read), read.tags, chrom_positions, read_positions, vcf_rec.CHROM, vcf_rec.start, vcf_rec.end)
             if read_seq == vcf_rec.REF:
                 num_support += 1
                 supporting_reads.append(read)
@@ -117,6 +116,7 @@ def main():
         counts[name] = c
         interesting_read_holder[name] = reads_holder
     pickle.dump(interesting_read_holder, open(args.pickleFile, "w"))
+
 
 if __name__ == "__main__":
     main()

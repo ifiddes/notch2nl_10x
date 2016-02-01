@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import cPickle as pickle
 
-base_dir = "./"
-sample = "H9"
+base_dir = "/hive/users/ifiddes/longranger-1.2.0/notch2nl_10x/linked_bam_analysis"
+sample = "NA12878"
 
 def find_unique_gems(assigned_gems_by_para):
     gem_counter = Counter()

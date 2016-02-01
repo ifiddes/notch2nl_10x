@@ -20,20 +20,19 @@ for para, c in counts.iteritems():
 
 a_and_b = gems["Notch2NL-A"] & gems["Notch2NL-B"]
 
-# need to reverse the alignment pos - seq pos thing as before
-start_pos = {"Notch2": 119989614, "Notch2NL-A": 146149503, "Notch2NL-B": 148600445, "Notch2NL-C": 149469354, "Notch2NL-D": 120799019}
+# We need the start positions for each in the actual genome, used a browser BLAT
+start_pos = {"Notch2": 120087516, "Notch2NL-A": 146248223, "Notch2NL-B": 148698969, "Notch2NL-C": 149374496, "Notch2NL-D": 120707775}
 # which of these are backwards?
-backwards = ["Notch2NL-A", "Notch2NL-B", "Notch2"]
+backwards = {"Notch2NL-C", "Notch2NL-D"}
 
+names = ['Notch2', 'Notch2NL-A', 'Notch2NL-B', 'Notch2NL-C', 'Notch2NL-D'] # same as in VCF
 
 
 # build a map of alignment positions to sequence positions
 r = {name: seq for name, seq in fastaRead("/hive/users/ifiddes/notch2nl_suns/notch2_aligned.fasta")}
 r_sort = sorted(r.iteritems(),key=lambda x: x[0])
 names, seqs = zip(*r_sort)
-tgt_is = {n: 0 for n in names if n not in backwards}
-for n in backwards:
-    tgt_is[n] = len(r[n].replace("-", "")) + 1
+tgt_is = {n: 0 for n in names}
 
 
 pos_map = defaultdict(dict)
@@ -42,10 +41,17 @@ for ref_i, cs in enumerate(zip(*seqs)):
         pos_map[name][ref_i] = tgt_i
     for name, c in zip(*[names, cs]):
         if c != "-":
-            if name not in backwards:
-                tgt_is[name] += 1
-            else:
-                tgt_is[name] -= 1
+            tgt_is[name] += 1
+
+
+# invert pos_map
+pos_map_inverted = defaultdict(dict)
+for para, vals in pos_map.iteritems():
+    if para not in backwards:
+        vals = {start_pos[para] - y: x for x, y in vals.iteritems()}
+    else:
+        vals = {start_pos[para] + y: x for x, y in vals.iteritems()}
+    pos_map_inverted[para] = vals
 
 
 # map interesting reads
@@ -55,8 +61,10 @@ for para in ["Notch2NL-A", "Notch2NL-B"]:
         for sup_read in interesting_read_holder[para][gem][0]:
             read_pos, ref_pos = zip(*sup_read.aligned_pairs)
             ref_pos = [x for x in ref_pos if x is not None]
-            left = pos_map[para][min(ref_pos) - start_pos[para]]
-            right = pos_map[para][max(ref_pos) - start_pos[para]]
+            start = pos_map_inverted[para][min(ref_pos)]
+            stop = pos_map_inverted[para][max(ref_pos)]
+            left = min([start, stop])
+            right = max([start, stop])
             sup_read = [para, left, right]
             read_holder[gem].append(sup_read)
         for read in interesting_read_holder[para][gem][1]:
@@ -65,8 +73,10 @@ for para in ["Notch2NL-A", "Notch2NL-B"]:
             read_pos, ref_pos = zip(*read.aligned_pairs)
             ref_pos = [x for x in ref_pos if x is not None]
             try:
-                left = pos_map[para][min(ref_pos) - start_pos[para]]
-                right = pos_map[para][max(ref_pos) - start_pos[para]]
+                start = pos_map_inverted[para][min(ref_pos)]
+                stop = pos_map_inverted[para][max(ref_pos)]
+                left = min([start, stop])
+                right = max([start, stop])
             except:
                 continue  # outside plot window anyways
             read = ["None", left, right]
@@ -96,9 +106,9 @@ import matplotlib.patches as patches
 from matplotlib.backends.backend_pdf import PdfPages
 
 with PdfPages('{}_disco_haplotypes.pdf'.format(sample)) as pdf:
-    for j in xrange(0, len(read_holder), 32):
-        tmp_reads = OrderedDict(list(sorted_read_holder.items()[j: j + 32]))
-        fig, plots = plt.subplots(min(32, len(read_holder) - j), sharey=True, sharex=True)
+    for j in xrange(0, len(read_holder), 20):
+        tmp_reads = OrderedDict(list(sorted_read_holder.items()[j: j + 20]))
+        fig, plots = plt.subplots(min(20, len(read_holder) - j), sharey=True, sharex=True)
         plt.yticks([])
         plt.ylim((0, 1))
         plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000))
@@ -185,3 +195,5 @@ for para in ["Notch2NL-A", "Notch2NL-B"]:
             plt.tight_layout(pad=2.5, h_pad=0.2)
             pdf.savefig()
     plt.close('all')
+
+
