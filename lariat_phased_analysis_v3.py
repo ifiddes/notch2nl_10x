@@ -1,12 +1,12 @@
 """
 10x genomics haplotype analysis making use of PS tag
 
+Version 2 uses a improved VCF that has all SUNs marked on all paralogs.
+However, this does not seem to work that well.
 
-NOTE: this has a huge flaw. We can't really evaluate gem errors here because we are only looking at vcf records
-that match a paralog. So, we are only seeing match/not match, not match/other paralogs.
-There are two solutions:
-1) remap to the consensus sequence. This will be annoying because we will lose pairing info
-2) build another VCF that reports <all> positions for <all> paralogs. Trying this first.
+For version 3, I realized that stacked mismatches can skew the plots. The new plots will be per-SUN instead of per-read
+and will do a weighted stacking of bases seen.
+
 """
 import sys
 import os
@@ -15,22 +15,16 @@ import vcf
 import itertools
 import argparse
 import cPickle as pickle
-from collections import defaultdict
+import math
+from collections import defaultdict, Counter
 from pybedtools import BedTool
 sys.path.append("/hive/users/ifiddes/comparativeAnnotator")
 from lib.seq_lib import ChromosomeInterval
 from lib.general_lib import format_ratio, mkdir_p
 
 
+mapq_cutoff = int(sys.argv[1])
 genome = 'NA12878'
-
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--bamfile", required=True)
-    parser.add_argument("--vcf", required=True)
-    parser.add_argument("--pickleFile", required=True)
-    return parser.parse_args()
 
 
 regions = [['chr1', 119989614, 120087517, 'Notch2'], 
@@ -40,13 +34,15 @@ regions = [['chr1', 119989614, 120087517, 'Notch2'],
            ['chr1', 120707777, 120799019, 'Notch2NL-D']]
 
 
-def bin_phased_reads(chrom, start, stop, bam_handle, offset=10000):
+def bin_phased_reads(chrom, start, stop, bam_handle, offset=10000, mapq_cutoff=30):
     """
     bins reads based on their BX tag
     """
     aln_iter = bam_handle.fetch(region="{}:{}-{}".format(chrom, start - offset, stop + offset), multiple_iterators=True)
     phased_reads = defaultdict(list)
     for rec in aln_iter:
+        if rec.mapq < mapq_cutoff:
+            continue
         tags = dict(rec.tags)  # pysam is weird - why is this not a dict?
         if 'PS' in tags:
             t = (tags['PS'], tags['HP'])
@@ -56,23 +52,12 @@ def bin_phased_reads(chrom, start, stop, bam_handle, offset=10000):
 
 bam_path = "/hive/users/ifiddes/longranger-1.2.0/{}/PHASER_SVCALLER_CS/PHASER_SVCALLER/ATTACH_PHASING/fork0/files/phased_possorted_bam.bam".format(genome)
 bam_handle = pysam.Samfile(bam_path)
-v_h = vcf.Reader(open("/hive/users/ifiddes/notch2nl_suns/Notch2NL_SUN_UniqueIndels.vcf.gz"))
+v_h = vcf.Reader(open("/hive/users/ifiddes/notch2nl_suns/Notch2NL_SUN_UniqueIndels_AllPerspectives.vcf.gz"))
 
 
 phased_read_holder = {}
-bam_handle = pysam.Samfile(bamfile)
 for chrom, start, stop, name in regions:
-    phased_read_holder[name] = bin_phased_reads(chrom, start, stop, bam_handle)
-
-
-out_dir = "/hive/users/ifiddes/longranger-1.2.0/notch2nl_10x/linked_bam_analysis/split_bams/{}".format(genome)
-mkdir_p(out_dir)
-for para in phased_read_holder:
-    for tag in phased_read_holder[para]:
-        with pysam.Samfile(os.path.join(out_dir, "{}.{}.bam".format(para, "_".join(map(str, tag)))), "wb", template=bam_handle) as outf:
-            for read in phased_read_holder[para][tag]:
-                outf.write(read)
-
+    phased_read_holder[name] = bin_phased_reads(chrom, start, stop, bam_handle, mapq_cutoff=mapq_cutoff)
 
 # validate these phasing results according to SUN positions
 
@@ -97,6 +82,15 @@ def find_read_positions(chrom_positions, read):
     return read_positions
 
 
+def build_gt_map(vcf_rec):
+    gt_map = {}
+    for s in vcf_rec.samples:
+        if s.gt_bases not in gt_map:
+            gt_map[s.gt_bases] = []  # avoid defaultdict to prevent bugs
+        gt_map[s.gt_bases].append(s.sample)
+    return gt_map
+
+
 def find_read_sun_intersections(reads, vcf_recs, bam_handle, min_aln_size=37):
     """
     Given a set of binned reads, do they intersect with unique positions? if so, determine if they also match the
@@ -104,7 +98,7 @@ def find_read_sun_intersections(reads, vcf_recs, bam_handle, min_aln_size=37):
     """
     # todo: get insertions to work
     vcf_intervals = [ChromosomeInterval(x.CHROM, x.start - 1, x.end - 1, None) for x in vcf_recs]
-    read_map = defaultdict(list)
+    evaled_vcfs = []
     for read in reads:
         # ignore un/poorly aligned reads
         if len(read.aligned_pairs) < min_aln_size:
@@ -112,24 +106,26 @@ def find_read_sun_intersections(reads, vcf_recs, bam_handle, min_aln_size=37):
         read_interval = ChromosomeInterval(bam_handle.getrname(read.tid), read.positions[0], read.positions[-1], None)
         intersections = [[vcf_recs[i], x] for i, x in enumerate(vcf_intervals) if x.proper_subset(read_interval)]
         if len(intersections) == 0:
-            read_map[None].append(read)
             continue
         for vcf_rec, vcf_interval in intersections:
             chrom_positions = range(vcf_rec.start, vcf_rec.end)
             read_positions = find_read_positions(chrom_positions, read)
             if len(chrom_positions) != len(read_positions) or None in read_positions:
-                read_map[None].append(read)
-                continue
+                continue  # can't handle insertions right now
             read_seq = "".join([read.seq[i] for i in read_positions])
-            for sample in vcf_rec.samples:
-                if sample.gt_bases == read_seq:
-                    read_map[sample.sample].append(read)
-    return read_map
+            gt_map = build_gt_map(vcf_rec)
+            if read_seq not in gt_map:
+                evaled_vcfs.append(["NoMatches", vcf_interval.start])
+            elif len(gt_map[read_seq]) == 1:
+                evaled_vcfs.append([gt_map[read_seq][0], vcf_interval.start])
+            else:
+                evaled_vcfs.append(["MultipleParalogs", vcf_interval.start])
+    return evaled_vcfs
 
 
 read_map_holder = {}
 region_map = {x[-1]: x for x in regions}
-for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C"]:
+for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C", "Notch2NL-D", "Notch2"]:
     chrom, start, stop, para = region_map[para]
     read_map_holder[para] = {}
     vcf_recs = list(v_h.fetch(chrom, start, stop))
@@ -175,76 +171,83 @@ for para, vals in pos_map.iteritems():
     pos_map_inverted[para] = vals
 
 
-
-# map interesting reads
-read_holder = defaultdict(dict)
-for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C"]:
+# build data structure
+data_holder = defaultdict(dict)
+for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C", "Notch2NL-D", "Notch2"]:
     for phase_set in read_map_holder[para]:
-        read_holder[para][phase_set] = []
-        for snp_para, reads in read_map_holder[para][phase_set].iteritems():
-            for read in reads:
-                read_pos, ref_pos = zip(*read.aligned_pairs)
-                ref_pos = [x for x in ref_pos if x is not None]
-                try:
-                    start = pos_map_inverted[para][min(ref_pos)]
-                    stop = pos_map_inverted[para][max(ref_pos)]
-                    left = min([start, stop])
-                    right = max([start, stop])
-                except:
-                    continue
-                read_pos = [snp_para, left, right]
-                read_holder[para][phase_set].append(read_pos)
+        data_holder[para][phase_set] = defaultdict(Counter)
+        for snp_para, pos in read_map_holder[para][phase_set]:
+            pos = pos_map_inverted[para][pos]
+            data_holder[para][phase_set][pos][snp_para] += 1
+        # filter out entries that don't matter
+        to_keep = {}
+        for pos, c in data_holder[para][phase_set].iteritems():
+            if len(set(names) & c.viewkeys()) != 0:
+                to_keep[pos] = sorted(c.items(), reverse=True)
+        data_holder[para][phase_set] = to_keep
 
 
-sorted_read_holder = OrderedDict()
-for para in read_holder:
-    sorted_read_holder[para] = OrderedDict()
-    for phase_set, reads in read_holder[para].iteritems():
-        reads = sorted(reads, key=lambda x: x[1])
-        sorted_read_holder[para][phase_set] = reads
+sorted_data_holder = OrderedDict()
+for para in data_holder:
+    sorted_data_holder[para] = OrderedDict()
+    for phase_set, d in data_holder[para].iteritems():
+        d = sorted(d.iteritems(), key=lambda x: x[0])
+        sorted_data_holder[para][phase_set] = d
 
 
 import matplotlib
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
 import seaborn as sns
-sns.set_style("white")
+sns.set_style("whitegrid")
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.backends.backend_pdf import PdfPages
 from collections import Counter
 
-colors = {None: "grey"}
-alphas = {None: 0.3}
-heights = {None: 0.2}
-bottoms = {None: 0.4}
+colors = {"NoMatches": sns.color_palette()[-1], "MultipleParalogs": "grey", None: "grey"}
 for i, n in enumerate(names):
     colors[n] = sns.color_palette()[i]
-    alphas[n] = 0.8
-    heights[n] = 0.8
-    bottoms[n] = 0.0
 
-with PdfPages('linked_bam_analysis/{}_phased_haplotypes.pdf'.format(genome)) as pdf:
-    for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C"]:
-        fig, plots = plt.subplots(len(sorted_read_holder[para]), sharey=True, sharex=True)
-        for i, tag in enumerate(sorted(sorted_read_holder[para].keys())):
-            reads = sorted_read_holder[para][tag]
+
+def find_largest(d):
+    vals = []
+    for x in d:
+        s = 0
+        for y in x[1]:
+            s += y[1]
+        vals.append(s)
+    return log_transform(max(vals))
+
+
+def log_transform(x):
+    return math.log(x + math.e - 1)
+
+
+with PdfPages('linked_bam_analysis/{}_phased_haplotypes_{}.pdf'.format(genome, mapq_cutoff)) as pdf:
+    for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C", "Notch2NL-D", "Notch2"]:
+        fig, plots = plt.subplots(len(sorted_data_holder[para]), sharey=True, sharex=True)
+        for i, tag in enumerate(sorted(sorted_data_holder[para].keys())):
+            d = sorted_data_holder[para][tag]
             p = plots[i]
-            p.set_ylabel("Haplotype {}".format(i))
-            plt.yticks([])
-            plt.ylim((0, 1))
+            p.set_ylabel("Haplotype {}".format(i), fontsize=9)
+            p.set_yticklabels([])
+            plt.ylim((0, find_largest(d)))
             plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000))
             plt.xlim((0, 100143))
-            errors = Counter([x[0] for x in reads if x[0] not in [None, para]])
-            p.set_xlabel("Mismatches: " + "  ".join([": ".join(map(str, x)) for x in errors.iteritems()]), fontsize=8)
-            p.hlines(color="black", y=0.5, xmin=0, xmax=100143, linewidth=0.5)
-            for read_para, left, right in reads:
-                box = {"xy": (left, bottoms[read_para]), "width": right - left, "height": heights[read_para], "color": colors[read_para], "alpha": alphas[read_para]}
-                _ = p.add_patch(patches.Rectangle(**box))
-        plt.suptitle("Visualization of {} phased reads in genome {}".format(para, genome))
-        plt.figtext(0.33, 0.05, "Notch2NL Consensus Position")
-        my_patches = [patches.Patch(color=colors[n], label=n) for n in names]
-        fig.legend(handles=my_patches, labels=names, title="SUN Matches", fontsize=9)
-        plt.tight_layout(rect=[0, 0.07, 0.88, 0.94])
+            for pos, counts in d:
+                offset = 0
+                for name, c in counts:
+                    v = log_transform(c)
+                    _ = p.vlines(x=pos, ymin=offset, ymax=v, color=colors[name])
+                    offset += v
+        plt.suptitle("Visualization of {} phased reads in genome {} with MapQ cutoff {}".format(para, genome, mapq_cutoff))
+        plt.figtext(0.01, 0.65, "log(# reads + e - 1)", rotation="vertical", fontsize=9)
+        plt.xlabel("Notch2NL Consensus Position")
+        allnames = list(names) + ["NoMatches", "MultipleParalogs"]
+        my_patches = [patches.Patch(color=colors[n], label=n) for n in allnames]
+        fig.legend(handles=my_patches, labels=allnames, title="SUN Matches", fontsize=9, loc="center right")
+        plt.tight_layout(rect=[0.01, 0.07, 0.86, 0.94])
         pdf.savefig()
         plt.close('all')
+
