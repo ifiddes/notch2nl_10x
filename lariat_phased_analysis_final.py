@@ -186,6 +186,8 @@ def reoganize_data(read_map_holder, pos_map_inverted):
 
 def find_largest(d):
     vals = []
+    if len(d) == 0:
+        return 1
     for x in d:
         s = 0
         for y in x[1]:
@@ -205,9 +207,10 @@ def plot_result(sorted_data_holder, out_path, genome, mapq_cutoff):
             for i, tag in enumerate(sorted(sorted_data_holder[para].keys())):
                 d = sorted_data_holder[para][tag]
                 p = plots[i]
+                ymax = find_largest(d)
                 p.set_ylabel("Haplotype {}".format(i), fontsize=9)
                 p.set_yticklabels([])
-                plt.ylim((0, find_largest(d)))
+                plt.ylim((0, ymax))
                 plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000))
                 plt.xlim((0, 100143))
                 for pos, counts in d:
