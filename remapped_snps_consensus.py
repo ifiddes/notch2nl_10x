@@ -77,7 +77,8 @@ def rev_comp(s, rc=string.maketrans("ATGC", "TACG")):
 # we need to build a set of any mismatches in the consensus - I.E., we want only to evaluate columns that all match.
 bad_columns = []
 for i, x in enumerate(zip(*seqs)):
-    if len(Counter(x)) != 1:
+    t = [q for q in x if q != "-"]
+    if len(Counter(t)) != 1:
         bad_columns.append(i)
 
 
@@ -88,7 +89,6 @@ f = []
 for k, g in groupby(enumerate(bad_columns), lambda (i,x):i-x):
     f.append(map(itemgetter(1), g))
 
-# this filters out deletions, maybe it won't matter
 bad_intervals = [ChromosomeInterval('Notch2NL_consensus', x[0], x[-1] + 1, ".") for x in f]
 
 import copy
@@ -96,7 +96,8 @@ remapped_snps = []
 for chrom, start, stop, para in regions:
     vcf_recs = snp_vcf.fetch(chrom, start, stop)
     for rec in vcf_recs:
-        if rec.heterozygosity == 0.5 and rec.samples[0].phased is True:
+        if True:
+        #if rec.heterozygosity == 0.5 and rec.samples[0].phased is True:
             orig_rec = copy.deepcopy(rec)
             rec.CHROM = 'Notch2NL_consensus'
             rec.add_info("PARA", para)
@@ -105,41 +106,44 @@ for chrom, start, stop, para in regions:
                 rec.ALT[0].sequence = rev_comp(rec.ALT[0].sequence)
                 rec.start = pos_map_inverted[para][orig_rec.end]
                 rec.end = pos_map_inverted[para][orig_rec.start]
-                rec.POS = rec.end
             else:
                 rec.start = pos_map_inverted[para][orig_rec.start] - 1
                 rec.end = pos_map_inverted[para][orig_rec.end] - 1
-                rec.POS = rec.end
+            rec.POS = rec.end
+            if rec.is_indel:
+                rec.POS = rec.end - len(rec.REF) + 1
             rec_interval = ChromosomeInterval(rec.CHROM, rec.start, rec.end, None)
-            intersections = [True for i, x in enumerate(bad_intervals) if x.overlap(rec_interval)]
+            intersections = [x for i, x in enumerate(bad_intervals) if x.overlap(rec_interval)]
             if len(intersections) > 0:
                 continue
-            assert consensus_fasta[rec.start: rec.end] == rec.REF
+            #assert len(rec.ALT) > 1 or consensus_fasta[rec.POS - 1: rec.POS + len(rec.REF) - 1] == rec.REF
             remapped_snps.append(rec)
 
 
-with open("remapped_heterozygous_snps_IlluminaGoldStandard_NA12878.vcf", "w") as outf:
+with open("remapped_snps_Illumina_NA12878.vcf", "w") as outf:
     w = vcf.Writer(outf, snp_vcf)
     for rec in remapped_snps:
         w.write_record(rec)
 
-# we have 159 heterozygous SNPs for NA12878 that are not in fact SUNs and are remappable
-# Counter({'Notch2': 51, 'Notch2NL-D': 50, 'Notch2NL-A': 40, 'Notch2NL-B': 12, 'Notch2NL-C': 6})
+
+# we have 171 heterozygous SNPs for NA12878 that are not in fact SUNs and are remappable
+Counter([x.INFO["PARA"] for x in remapped_snps])
+# Counter({'Notch2NL-D': 54, 'Notch2': 54, 'Notch2NL-A': 42, 'Notch2NL-B': 14, 'Notch2NL-C': 7})
 # not a lot of B/C specific SNPs...
 # I am going to use the exact same code for the NA12878 gold standard VCF I found from Illumina
-# Counter({'Notch2': 47, 'Notch2NL-D': 12, 'Notch2NL-A': 9, 'Notch2NL-C': 4})
-# Gold standard has far fewer SNPs, but the ratios seem more realistic accurate.
+# Counter({'Notch2': 49, 'Notch2NL-D': 12, 'Notch2NL-A': 10, 'Notch2NL-C': 5})
+# Gold standard has far fewer SNPs, but the ratios seem more realistic. Nothing for B because it is unphased.
 # how many are unique to each set?
 
 # do some BED intersections
 
 from pybedtools import BedTool
 
-ill = BedTool("remapped_heterozygous_snps_IlluminaGoldStandard_NA12878.vcf")
+ill = BedTool("remapped_snps_Illumina_NA12878.vcf")
 tenx = BedTool("remapped_heterozygous_snps_NA12878.vcf")
-len(list(ill.intersect(tenx)))
-# 60 overlaps overall - breakdown by paralog
-Counter([x.fields[7].split(";")[-1].split("=")[1] for x in ill.intersect(tenx)])
-# Counter({u'Notch2': 39, u'Notch2NL-D': 9, u'Notch2NL-A': 8, u'Notch2NL-C': 4})
-# generally it seems that both sets agree, except for Notch2NL-B, where Illumina has nothing.
-# Therefore, I am going to stick with what 10x has, until the NA12878 run with the input VCF is done.
+Counter([x.fields[7].split(";")[-1].split("=")[1] for x in tenx.intersect(ill)])
+# Counter({u'Notch2': 40, u'Notch2NL-D': 9, u'Notch2NL-A': 8, u'Notch2NL-C': 5})
+
+# write a consensus VCF
+recs = tenx.intersect(ill)
+recs.saveas("remapped_heterozygous_snps_consensus.vcf")

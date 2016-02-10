@@ -298,4 +298,3 @@ with PdfPages('linked_bam_analysis/{}_phased_haplotypes_rescued_reads_{}.pdf'.fo
         plt.tight_layout(rect=[0.01, 0.07, 0.86, 0.94])
         pdf.savefig()
         plt.close('all')
-
