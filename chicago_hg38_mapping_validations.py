@@ -19,6 +19,8 @@ from lib.seq_lib import ChromosomeInterval
 from lib.general_lib import format_ratio, mkdir_p, DefaultOrderedDict
 from sonLib.bioio import fastaRead
 from collections import OrderedDict
+
+
 # i need to sort the BAM by read tag
 bam_handle = pysam.Samfile("CP499_chicago_500kb_notch2nl.bam.pairs.fq.hg38.read_sorted.bam")
 read_dict = defaultdict(list)
@@ -92,6 +94,7 @@ def find_read_snp_sun_intersections(read, snp_intervals, snp_recs, sun_intervals
     read_interval = ChromosomeInterval(bam_handle.getrname(read.tid), read.positions[0], read.positions[-1], None)
     sun_intersections = [[sun_recs[i], x] for i, x in enumerate(sun_intervals) if x.proper_subset(read_interval)]
     snp_intersections = [[snp_recs[i], x] for i, x in enumerate(snp_intervals) if x.proper_subset(read_interval)]
+    assert len(sun_intersections) == 0
     sun_results = list(compare_sun_to_reference(sun_intersections, read))
     snp_results = list(compare_snp_to_reference(snp_intersections, read))
     return snp_results, sun_results
@@ -117,4 +120,7 @@ for qname, reads in read_dict.iteritems():
             analyzed_reads[qname]['sun'].append(sun_results)
 
 
+# no SUN hits because these reads are from the wrong region. Can't fix until I get new reads.
+
 # TODO: try using this information to bridge together 10x-derived phase blocks.
+

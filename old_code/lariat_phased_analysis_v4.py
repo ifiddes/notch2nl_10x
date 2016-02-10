@@ -23,10 +23,10 @@ from lib.general_lib import format_ratio, mkdir_p
 
 
 genome = 'NA12878'
-regions = [['chr1', 119989614, 120087517, 'Notch2'], 
-           ['chr1', 146149503, 146248224, 'Notch2NL-A'], 
-           ['chr1', 148600445, 148698970, 'Notch2NL-B'], 
-           ['chr1', 149374498, 149469354, 'Notch2NL-C'], 
+regions = [['chr1', 119989614, 120087517, 'Notch2'],
+           ['chr1', 146149503, 146248224, 'Notch2NL-A'],
+           ['chr1', 148600445, 148698970, 'Notch2NL-B'],
+           ['chr1', 149374498, 149469354, 'Notch2NL-C'],
            ['chr1', 120707777, 120799019, 'Notch2NL-D']]
 
 

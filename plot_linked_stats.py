@@ -14,6 +14,7 @@ import cPickle as pickle
 base_dir = "/hive/users/ifiddes/longranger-1.2.0/notch2nl_10x/linked_bam_analysis"
 sample = "NA12878"
 
+
 def find_unique_gems(assigned_gems_by_para):
     gem_counter = Counter()
     for gems in assigned_gems_by_para.itervalues():
@@ -86,7 +87,7 @@ def do_bin_plot(counts, base_dir, sample):
         n = ",".join(sorted([x[-1] if "-" in x else x[0] for x in names]))
         data[n] = val
     colors = sns.color_palette("cubehelix", len(data))
-    colors = dict([(k,color) for k, color in zip(*[data.keys(), colors])])
+    colors = dict([(k, color) for k, color in zip(*[data.keys(), colors])])
     cats = ["A", "B", "C", "D", "N"]
     for i, cat in enumerate(sorted(cats)):
         y = 0
