@@ -196,3 +196,46 @@ with open("Notch2NL_SUN_UniqueIndels_extended.vcf", "w") as outf:
     outf.write(fields + "\n")
     for r in sorted(new_recs, key=lambda x: int(x.split()[1])):
         outf.write(r)
+
+
+all_ref_recs = []
+for rec in filt_recs:
+    aln_pos = int(rec[1])
+    ref = rec[3]
+    alts = rec[4].split(",")
+    combined_gts = [ref] + alts
+    gts = OrderedDict()
+    for i, name in enumerate(names, 9):
+        try:
+            h = int(rec[i].split("/")[0])
+            gts[name] = combined_gts[h]
+        except:
+            gts[name] = "."
+    counts = Counter(gts.itervalues())
+    if 1 not in [y for x, y in counts.iteritems() if x != '.']:
+        continue
+    for ref_para in names:
+        if gts[ref_para] != '.':
+            # this is unique to this paralog
+            new_gts = [gts[ref_para]] + list(set(gts.itervalues()) - set([gts[ref_para]]))
+            new_gts = [x for x in new_gts if x != "."]
+            if ref_para not in backwards:
+                pos = start_pos[ref_para] - pos_map[ref_para][aln_pos]
+                this_ref = rev_comp(new_gts[0])
+                this_alt = ",".join([rev_comp(x) for x in new_gts[1:]])
+                if len(this_ref) > 1:
+                    pos -= len(this_ref) - 1
+            else:
+                pos = pos_map[ref_para][aln_pos] + start_pos[ref_para]
+                this_ref = new_gts[0]
+                this_alt = ",".join(new_gts[1:])
+            assert chr1_fasta[pos: pos + len(this_ref)].upper() == this_ref
+            this_rec = map(str, [new_gts.index(x) if x != "." else "." for x in gts.itervalues()])
+            all_ref_recs.append(rec_template.format(pos=pos + 1, ref=this_ref, alt=this_alt, gts="\t".join(this_rec)))
+
+
+with open("Notch2NL_SUN_UniqueIndels_extended_AllPerspectives.vcf", "w") as outf:
+    outf.write(header + "\n")
+    outf.write(fields + "\n")
+    for r in sorted(all_ref_recs, key=lambda x: int(x.split()[1])):
+        outf.write(r)

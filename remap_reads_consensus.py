@@ -12,6 +12,7 @@ import argparse
 import tempfile
 import os
 import subprocess
+from pyfasta import Fasta
 from operator import itemgetter
 from itertools import groupby
 from collections import Counter, defaultdict
@@ -38,18 +39,18 @@ def parse_args():
     return parser.parse_args()
 
 
-regions = [['chr1', 119989614, 120087517, 'Notch2'],
-           ['chr1', 146149503, 146248224, 'Notch2NL-A'],
-           ['chr1', 148600445, 148698970, 'Notch2NL-B'],
-           ['chr1', 149374498, 149469354, 'Notch2NL-C'],
-           ['chr1', 120707777, 120799019, 'Notch2NL-D']]
+regions = [['chr1', 119990189, 120163923, 'Notch2'],
+           ['chr1', 146149601, 146329308, 'Notch2NL-A'],
+           ['chr1', 148597945, 148786127, 'Notch2NL-B'],
+           ['chr1', 149349476, 149477855, 'Notch2NL-C'],
+           ['chr1', 120706154, 120801963, 'Notch2NL-D']]
 
 
-def extract_reads(bam):
+def extract_reads(bam, offset=25000):
     tmp_paired = tmpFileGet(suffix='paired.fq')
     tmp_single = tmpFileGet(suffix='single.fq')
     tmp_shuf = tmpFileGet()
-    region_strs = ['{}:{}-{}'.format(chrom, start, stop) for chrom, start, stop, para in regions]
+    region_strs = ['{}:{}-{}'.format(chrom, start - offset, stop + offset) for chrom, start, stop, para in regions]
     view_cmd = ['samtools', 'view', '-b', bam]
     view_cmd.extend(region_strs)
     cmd = [view_cmd,
@@ -111,13 +112,14 @@ def pileup(out_bam, vcf_path):
     return wgs_results
 
 
-def plot_results(wgs_results, out_pdf):
+def plot_results(wgs_results, out_pdf, aln_size):
     paralogs = ['Notch2', 'Notch2NL-A', 'Notch2NL-B', 'Notch2NL-C', 'Notch2NL-D']
     fig, plots = plt.subplots(5, sharey=True, sharex=True)
     plt.yticks((0, 0.1, 0.2, 0.3, 0.4))
     plt.ylim((0, 0.4))
-    plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000))
-    plt.xlim((0, 100143))
+    xticks = range(0, int(round(aln_size / 10000.0) * 10000.0))
+    plt.xticks(xticks)
+    plt.xlim((0, aln_size))
     plt.xlabel("Alignment position")
     for i, (p, para) in enumerate(zip(plots, paralogs)):
         p.set_title(para)
@@ -138,6 +140,12 @@ def plot_results(wgs_results, out_pdf):
     plt.close()
 
 
+def get_aln_size(consensus_ref):
+    f = Fasta(consensus_ref)
+    assert len(f) == 1
+    return len(f[f.keys()[0]])
+
+
 def main():
     args = parse_args()
     if args.outBam is None:
@@ -146,7 +154,8 @@ def main():
         out_bam = args.outBam
     build_remapped_bam(args.inBam, args.consensusRef, out_bam)
     wgs_results = pileup(out_bam, args.consensusVcf)
-    plot_results(wgs_results, args.outPdf)
+    aln_size = get_aln_size(args.consensusRef)
+    plot_results(wgs_results, args.outPdf, aln_size)
     if args.outBam is None:
         os.remove(out_bam)
 
