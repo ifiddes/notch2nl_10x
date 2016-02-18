@@ -203,7 +203,8 @@ def log_transform(x):
 def plot_result(sorted_data_holder, out_path, genome, mapq_cutoff):
     with PdfPages(out_path) as pdf:
         for para in ["Notch2NL-A", "Notch2NL-B", "Notch2NL-C", "Notch2NL-D", "Notch2"]:
-            fig, plots = plt.subplots(len(sorted_data_holder[para]), sharey=True, sharex=True)
+            # max because some people may have no phased reads on alternate haplotype
+            fig, plots = plt.subplots(max(len(sorted_data_holder[para]), 2), sharey=True, sharex=True)
             for i, tag in enumerate(sorted(sorted_data_holder[para].keys())):
                 d = sorted_data_holder[para][tag]
                 p = plots[i]

@@ -116,7 +116,7 @@ def plot_results(wgs_results, out_pdf):
     fig, plots = plt.subplots(5, sharey=True, sharex=True)
     plt.yticks((0, 0.1, 0.2, 0.3, 0.4))
     plt.ylim((0, 0.4))
-    plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000))
+    plt.xticks((0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000))
     plt.xlim((0, 100143))
     plt.xlabel("Alignment position")
     for i, (p, para) in enumerate(zip(plots, paralogs)):

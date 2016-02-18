@@ -34,7 +34,7 @@ def main():
     args = parse_args()
     vcf_handle = vcf.Reader(args.invcf)
     phase_blocks = get_phase_blocks(vcf_handle, args.chrom, args.startPos, args.endPos)
-    if args.Id is not None:
+    if args.genome is not None:
         args.outbed.write('track name="{} Phase Blocks"\n'.format(args.genome))
     for rec in phase_blocks:
         args.outbed.write('\t'.join(rec) + '\n')
