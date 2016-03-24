@@ -1,6 +1,16 @@
 """
-I totally fucked this up and deleted the code. This is the salvage attempt from the log.
+Break up the alignment into blocks of SUN-able positions and run them separartely through jvarkit, then merge
+
+
+region1: 0-15866: missing D
+region2: 15867-74916: missing C and D
+region3: 74917-81068: missing D
+region4: 81069-162368: all
+region5: 162369-165396: missing D
+region6: 165397-end: all
+TODO: region6 is incomplete because you never realigned that region
 """
+
 import sys, os, vcf, string
 from collections import defaultdict, Counter, OrderedDict
 sys.path.append("/hive/users/ifiddes/comparativeAnnotator")

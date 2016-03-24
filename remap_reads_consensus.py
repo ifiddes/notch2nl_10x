@@ -46,50 +46,35 @@ regions = [['chr1', 119990189, 120163923, 'Notch2'],
            ['chr1', 120706154, 120801963, 'Notch2NL-D']]
 
 
-def extract_reads(bam, offset=25000):
-    tmp_paired = tmpFileGet(suffix='paired.fq')
-    tmp_single = tmpFileGet(suffix='single.fq')
+def extract_reads(bam, offset=50000):
+    tmp_reads = tmpFileGet(suffix='reads.fq')
     tmp_shuf = tmpFileGet()
     region_strs = ['{}:{}-{}'.format(chrom, start - offset, stop + offset) for chrom, start, stop, para in regions]
     view_cmd = ['samtools', 'view', '-b', bam]
     view_cmd.extend(region_strs)
     cmd = [view_cmd,
            ['samtools', 'bamshuf', '-Ou', '-', tmp_shuf],
-           ['samtools', 'bam2fq', '-s', tmp_single, '-']]
-    with open(tmp_paired, 'w') as tmp_paired_h:
-        runProc(cmd, stdout=tmp_paired_h)
-    return tmp_paired, tmp_single
+           ['samtools', 'bam2fq', '-']]
+    with open(tmp_reads, 'w') as tmp_paired_h:
+        runProc(cmd, stdout=tmp_reads)
+    return tmp_reads
 
 
-def remap_reads(tmp_paired, tmp_single, index):
+def remap_reads(tmp_reads, index, out_bam):
     sort_tmp = tmpFileGet()
-    paired_bam = tmpFileGet(suffix='paired.sorted.bam')
-    unpaired_bam = tmpFileGet(suffix='unpaired.sorted.bam')
-    paired_cmd = [['bwa', 'mem', '-p', index, tmp_paired],
+    cmd = [['bwa', 'mem', '-p', index, tmp_reads],
                   ['samtools', 'view', '-b', '-'],
                   ['samtools', 'sort', '-T', sort_tmp, '-O', 'bam', '-']]
-    unpaired_cmd = [['bwa', 'mem', index, tmp_single],
-                   ['samtools', 'view', '-b', '-'],
-                   ['samtools', 'sort', '-T', sort_tmp, '-O', 'bam', '-']]
-    for cmd, path in [[paired_cmd, paired_bam], [unpaired_cmd, unpaired_bam]]:
-        with open(path, 'w') as f_h:
-            runProc(cmd, stdout=f_h)
-    return paired_bam, unpaired_bam
-
-
-def merge_bams(paired_bam, unpaired_bam, out_bam):
-    cmd = ['samtools', 'merge', out_bam, paired_bam, unpaired_bam]
-    runProc(cmd)
+    with open(out_bam, 'w') as f_h:
+        runProc(cmd, stdout=f_h)
     cmd = ['samtools', 'index', out_bam]
     runProc(cmd)
 
 
 def build_remapped_bam(in_bam, consensus_ref, out_bam):
-    tmp_paired, tmp_single = extract_reads(in_bam)
-    paired_bam, unpaired_bam = remap_reads(tmp_paired, tmp_single, consensus_ref)
-    merge_bams(paired_bam, unpaired_bam, out_bam)
-    for p in [tmp_paired, tmp_single, paired_bam, unpaired_bam]:
-        os.remove(p)
+    tmp_reads = extract_reads(in_bam)
+    remap_reads(tmp_reads, consensus_ref, out_bam)
+    os.remove(tmp_reads)
 
 
 def pileup(out_bam, vcf_path):
@@ -100,14 +85,17 @@ def pileup(out_bam, vcf_path):
         if vcf_rec.is_indel:
             continue
         pos_str = "{0}:{1}-{1}".format(vcf_rec.CHROM, vcf_rec.POS)
-        cmd = ['samtools', 'mpileup', '-q', '20', '-Q', '20', '-r', pos_str, out_bam]
+        cmd = ['samtools', 'mpileup', '-r', pos_str, out_bam]
         mpileup_rec = callProc(cmd).split()
         pile_up_result = Counter(x.upper() for x in mpileup_rec[4] if x in bases)
         sample_dict = {s.sample: s.gt_bases for s in vcf_rec.samples}
         for s in vcf_rec.samples:
             if len([x for x in sample_dict.itervalues() if x == s.gt_bases]) != 1:
                 continue
+            if s.gt_bases is None:
+                continue
             c = 1.0 * pile_up_result[s.gt_bases] / len(mpileup_rec[4])
+            c *= 1.0 * len([x for x in sample_dict.itervalues() if x is not None]) / len(sample_dict)
             wgs_results[s.sample].append([vcf_rec.POS, c])
     return wgs_results
 
@@ -117,8 +105,8 @@ def plot_results(wgs_results, out_pdf, aln_size):
     fig, plots = plt.subplots(5, sharey=True, sharex=True)
     plt.yticks((0, 0.1, 0.2, 0.3, 0.4))
     plt.ylim((0, 0.4))
-    xticks = range(0, int(round(aln_size / 10000.0) * 10000.0))
-    plt.xticks(xticks)
+    xticks = range(0, int(round(aln_size / 10000.0) * 10000.0), 10000)
+    plt.xticks(xticks, rotation='vertical')
     plt.xlim((0, aln_size))
     plt.xlabel("Alignment position")
     for i, (p, para) in enumerate(zip(plots, paralogs)):
